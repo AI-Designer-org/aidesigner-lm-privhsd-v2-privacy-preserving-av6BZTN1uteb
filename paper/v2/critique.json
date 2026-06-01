@@ -1,0 +1,49 @@
+{
+  "verdict": "needs_revision",
+  "iteration": 2,
+  "summary": "The draft is much better aligned with the reference-architecture contract and resolves most of the iteration-1 overclaiming. The remaining issues are a still-overstated design guarantee in the conclusion, an unsubstantiated public release/license claim, and one mathematical appendix statement that appears incorrect as written.",
+  "issues": [
+    {
+      "id": "i_01",
+      "severity": "major",
+      "category": "claims",
+      "location": "Conclusion, final sentence",
+      "problem": "The paper concludes that privacy-by-design architectures are those 'where privacy is guaranteed by the model's structure rather than by policy'. This is stronger than the evidence established in the paper and overstates what the current artifact shows. The draft elsewhere correctly says the architecture is intended to reduce leakage and that trained-model evaluation is still required; the final sentence reintroduces a guarantee claim not supported by the validation harness.",
+      "suggested_fix": "Replace 'privacy is guaranteed by the model's structure' with narrower language such as 'privacy protections are embedded in the model's structure' or 'privacy is pursued by architectural design rather than policy alone', and keep the guarantee claim limited to the formal DP mechanism only when applicable.",
+      "persisted_from_previous": true
+    },
+    {
+      "id": "i_02",
+      "severity": "major",
+      "category": "factual",
+      "location": "Conclusion, paragraph beginning 'The full source code...'; NeurIPS Checklist item 5",
+      "problem": "The revised paper now says the code will be released upon acceptance, which fixes the previous overstatement, but it still states that release will be under an open-source license while the supplied artifact tree contains no LICENSE file and no concrete repository or license identifier. coder/README.md refers to an MIT license, but the referenced LICENSE file is absent. As written, the release/licensing statement remains only partially substantiated.",
+      "suggested_fix": "Either add the actual LICENSE file / concrete license identifier and repository information to the artifact, or weaken the paper text to 'code is included with the artifact submission and is intended for public release upon acceptance' without asserting a specific open-source license unless it is actually present.",
+      "persisted_from_previous": true
+    },
+    {
+      "id": "i_07",
+      "severity": "major",
+      "category": "latex",
+      "location": "Appendix, Equation (\\ref{eq:rdp}) and the sentence immediately below it",
+      "problem": "The appendix states 'where RDP_\u03bb(\u03c3) = \u03bb \u22c5 \u03c3^2 / 2 for the Gaussian mechanism.' This is not the standard form of the Gaussian-mechanism RDP expression and, as written, is likely mathematically incorrect or at least misleading without the missing dependence on sensitivity/subsampling assumptions and the exact accounting regime. Since this equation is presented as formal privacy-accounting detail, an incorrect formula is a substantive issue.",
+      "suggested_fix": "Either remove the explicit closed-form expression and state that privacy accounting follows Opacus/RDP accounting, or replace it with the correct formula together with the necessary assumptions (e.g., sensitivity normalization, sampling model, and conversion details) and cite the appropriate source precisely.",
+      "persisted_from_previous": false
+    }
+  ],
+  "scope_check": {
+    "overstates_empirical_results": false,
+    "claims_sota_without_numbers": false,
+    "relabels_synthetic_as_real": false,
+    "demands_trained_model_results": false,
+    "ignores_research_eval_gaps": false,
+    "states_unverified_claim_as_fact": true,
+    "claims_baseline_superiority_without_coverage": false
+  },
+  "stats": {
+    "blockers": 0,
+    "majors": 3,
+    "minors": 0,
+    "nits": 0
+  }
+}

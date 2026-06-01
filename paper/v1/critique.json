@@ -1,0 +1,76 @@
+{
+  "verdict": "needs_revision",
+  "iteration": 1,
+  "summary": "The draft is generally well scoped as a reference-architecture paper, but it still contains a few submission-blocking overclaims and factual/citation issues relative to the upstream artifacts. The main fixes are to remove ungrounded guarantees about identity-agnostic representations, correct release-status claims, and soften novelty/comparison language that research_eval marks as unverified.",
+  "issues": [
+    {
+      "id": "i_01",
+      "severity": "blocker",
+      "category": "claims",
+      "location": "Discussion, Section 6.1 'Rights-based by construction', sentences 2--3",
+      "problem": "The paper states that adversarial training 'makes pooled representations identity-agnostic even with white-box access'. This is stronger than the available evidence. In validator/research_eval/claim_grounding.md, the sufficiency of synthetic pseudo-author labels is marked TODO: unverified, and the core disentanglement-effectiveness claims remain hypotheses rather than established results.",
+      "suggested_fix": "Rewrite this passage to describe the mechanism as intended or designed to reduce identity leakage, not to guarantee identity-agnostic representations under white-box access. Explicitly note that effectiveness against re-identification requires trained-model evaluation.",
+      "persisted_from_previous": false
+    },
+    {
+      "id": "i_02",
+      "severity": "blocker",
+      "category": "factual",
+      "location": "Conclusion, final paragraph, sentence 1; NeurIPS Checklist item 5",
+      "problem": "The manuscript says the code 'are released under an open-source license' and the checklist answers 'Yes' to code release. The artifact tree shows source files are present for this review loop, but no LICENSE file is present in coder/ and the paper does not identify an actual repository or release location. As written, this is a factual release claim the submission does not substantiate.",
+      "suggested_fix": "If the code has not been publicly released, change the text to 'code is included with the artifact' or 'will be released upon acceptance/after review', and revise Checklist item 5 accordingly. If it has been released, provide the concrete repository/link and license identifier.",
+      "persisted_from_previous": false
+    },
+    {
+      "id": "i_03",
+      "severity": "major",
+      "category": "research_eval",
+      "location": "Introduction, paragraph ending at lines 121--125; Related Work, 'Research Gap' subsection",
+      "problem": "The paper says 'no existing work systematically combines' the listed mechanisms and frames several empirical questions around Pareto dominance and privacy reduction. Validator scorecard.json marks the core novelty claim ('DP + adversarial > either alone') as unverified, and claim_grounding.md treats several central mechanism-benefit statements as hypotheses/TODO rather than grounded facts. The current wording reads too definitive for the available evidence.",
+      "suggested_fix": "Narrow the novelty language to what is actually established by the artifacts, e.g. 'to our knowledge, we are not aware of a prior HSD reference implementation that integrates these components in one reproducible framework'. Keep performance/benefit statements explicitly hypothetical unless supported by measured runs or literature.",
+      "persisted_from_previous": false
+    },
+    {
+      "id": "i_04",
+      "severity": "major",
+      "category": "research_eval",
+      "location": "Method, Section 4.5 'Differential Privacy via Opacus', sentence on 'per-layer adaptive clipping'; Results, Ablation Framework table; Appendix 'DP-SGD Privacy Accounting Details'",
+      "problem": "The draft presents per-layer adaptive clipping as part of the implemented method, but the validator materials explicitly note that this feature may fall back to uniform clipping due to Opacus integration complexity and that its benefit is unverified. coder/src/train.py shows PrivacyEngine is configured only with a single max_grad_norm and no demonstrated per-layer clipping path in the actual DP setup.",
+      "suggested_fix": "Describe per-layer clipping as an experimental or optional adapter rather than a settled implemented capability in the training path, unless you can point to the exact active integration. Also disclose the documented fallback to uniform clipping and avoid implying measured utility gains from per-layer clipping.",
+      "persisted_from_previous": false
+    },
+    {
+      "id": "i_05",
+      "severity": "major",
+      "category": "citations",
+      "location": "References: entries biy2025privacy, faustini2025idt, frikha2025incognitext, makroo2025hidden; claims that rely on them in Introduction and Related Work",
+      "problem": "Several 2025 citations are central to the paper's framing, but the manuscript provides only sparse bibliographic metadata and some entries look difficult to verify from the supplied artifacts alone. Because these references are doing substantive argumentative work, they need to be precise enough for a reviewer to identify them unambiguously. As written, at least some entries read like placeholders rather than camera-ready citations.",
+      "suggested_fix": "Verify each 2025 reference against the actual source and expand the bibliography to full, unambiguous metadata (complete author list where standard, exact venue/workshop name, pages or persistent identifier/DOI/arXiv version). If any citation cannot be verified, remove or weaken the dependent claim.",
+      "persisted_from_previous": false
+    },
+    {
+      "id": "i_06",
+      "severity": "minor",
+      "category": "factual",
+      "location": "Validation Setup, 'Compute Environment', sentence 'the pretrained transformer backbone is a stub for shape validation' versus Method and Results sections that describe an ALBERT-base-v2 backbone with exact parameterization",
+      "problem": "The draft mixes two descriptions of the implementation: a concrete ALBERT-base-v2 backbone with exact parameter counts, and a CPU smoke-test setup where the pretrained backbone is stubbed out and no HuggingFace downloads occur. This can confuse reviewers about which results correspond to the real model versus the validation stub.",
+      "suggested_fix": "Add one clarifying sentence in Results or Validation Setup stating that the reported harness results were obtained on a stubbed/synthetic validation path, while architecture and parameter counts describe the reference target model configuration.",
+      "persisted_from_previous": false
+    }
+  ],
+  "scope_check": {
+    "overstates_empirical_results": false,
+    "claims_sota_without_numbers": false,
+    "relabels_synthetic_as_real": false,
+    "demands_trained_model_results": false,
+    "ignores_research_eval_gaps": true,
+    "states_unverified_claim_as_fact": true,
+    "claims_baseline_superiority_without_coverage": false
+  },
+  "stats": {
+    "blockers": 2,
+    "majors": 3,
+    "minors": 1,
+    "nits": 0
+  }
+}

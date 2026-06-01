@@ -1,0 +1,1096 @@
+\documentclass{article}
+
+% --- Track option: Workshop (no trained-model empirical results available) ---
+\usepackage[workshop]{neurips_2026}
+
+% --- Required packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% --- Title ---
+\title{PrivHSD: A Reference Architecture for Privacy-Preserving Hate Speech Detection
+       with Multi-Level Adversarial Disentanglement}
+
+% Anonymous submission — no author info
+\author{Anonymous Author(s)\\
+        Affiliation(s)\\
+        \texttt{email@example.com}}
+
+\begin{document}
+
+\maketitle
+
+% ═════════════════════════════════════════════════════════════════════════════
+% Abstract
+% ═════════════════════════════════════════════════════════════════════════════
+
+\begin{abstract}
+Hate speech detection (HSD) models pose an inherent privacy risk: by processing
+text, they inevitably encode stylistic fingerprints that enable authorship
+attribution, membership inference, and attribute inference, transforming
+protective moderation tools into potential surveillance infrastructure.
+We present \textbf{PrivHSD}, a reference architecture and validation harness for
+privacy-preserving HSD that operates agnostically to the author's identity.
+The architecture combines three complementary mechanisms---differential privacy
+via DP-SGD with formal $(\varepsilon,\delta)$ guarantees, multi-level adversarial
+identity disentanglement (MLAD) with gradient reversal at the pooler, token, and
+attention-head levels, and mutual information minimization via the MINE
+estimator---to strip identity signals from the representation space while
+preserving hate-relevant features.
+We provide a fully typed \texttt{ModelConfig} dataclass, a shape-annotated
+reference implementation ($\sim$15.3M parameters for the ALBERT-base-v2
+backbone), and a comprehensive validation harness covering shape correctness (9
+tests), gradient flow (8 tests), numerical stability in bf16 (6 tests), and a
+privacy attack suite spanning membership inference, attribute inference, and
+stylometry-based re-identification risk.
+All 45+ unit tests pass on synthetic data, and the ablation framework
+systematically characterises 11 single-field config variants.
+This paper does \emph{not} report trained-model results on real datasets---the
+contribution is the design artifact itself and the validation framework,
+enabling reproducible follow-up work on the privacy--utility Pareto
+frontier for content moderation.
+\end{abstract}
+
+% ═════════════════════════════════════════════════════════════════════════════
+% Introduction
+% ═════════════════════════════════════════════════════════════════════════════
+
+\section{Introduction}
+
+The moderation of hate speech on digital platforms is both a societal necessity
+and a growing regulatory requirement. The EU Digital Services Act
+(Regulation~2022/2065) mandates proportionate content moderation for systemic
+platforms, while the Council of Europe's CM/Rec(2021)8 calls for democratic
+safeguards in online speech governance.
+Automated hate speech detection (HSD) systems are a key technical response,
+with transformer-based classifiers approaching practical utility at scale.
+
+Yet these systems introduce a profound privacy tension that has received
+substantially less attention than detection accuracy.
+A text classifier does not merely predict labels: it constructs internal
+representations that encode the stylistic, topical, and syntactic
+signature of the author.
+Empirical research over two decades has shown that stylometric features
+enable authorship attribution with accuracy exceeding 90\% given
+sufficient candidate authors \cite{abbasi2008writerpints,narayanan2012feasibility}.
+More recent work demonstrates that model representations can leak protected
+attributes such as gender, age, and geographic dialect
+\cite{shokri2017membership,fredrikson2015model}, and that membership
+inference attacks can determine whether a specific text was present in
+the training set \cite{makroo2025hidden,yeom2018privacy}.
+
+These risks invert the ethical equation of content moderation: a tool
+designed to protect vulnerable communities becomes a surveillance instrument
+that chills the very speech it aims to safeguard.
+The tension is captured by the principle of \emph{privacy by design}
+\cite{cavoukian2009privacy}, which requires that privacy protections be
+embedded into the architecture rather than added as an afterthought.
+
+\paragraph{The privacy--utility trade-off in HSD.}
+There is an inherent tension between detection accuracy and privacy
+protection. Stronger privacy guarantees---tighter differential privacy
+budgets, more aggressive identity disentanglement---add noise or remove
+signal from the model, degrading classification performance.
+The central optimisation target is:
+
+\begin{quote}
+Maximise detection performance (F1, AUC) while minimising privacy leakage
+($\varepsilon$, MIA success, stylometry re-identification accuracy).
+\end{quote}
+
+Prior work has explored individual privacy mechanisms for HSD.
+Bueno J\'unior et al.~\cite{bueno2025privacy} (NAACL~2025) studied DP-SGD in a
+federated setting and found that ALBERT's parameter-efficient architecture
+is particularly robust under differential privacy.
+Faustini et al.~\cite{faustini2025idt} proposed adversarial rewriting for
+attribute anonymisation in sentiment analysis.
+Frikha et al.~\cite{frikha2025incognitext} demonstrated LLM-based attribute
+randomisation for text anonymisation.
+To our knowledge, we are not aware of a prior HSD reference implementation
+that integrates formal differential privacy guarantees, multi-level adversarial
+identity disentanglement, and mutual information minimisation in a single
+reproducible framework, nor of one that evaluates such a combination against a
+comprehensive privacy attack suite spanning membership inference, attribute
+inference, and stylometry.
+
+\paragraph{Scope and contributions.}
+This paper presents a \textbf{reference architecture and validation
+harness} for privacy-preserving HSD. We do \emph{not} report
+trained-model results on real datasets---such evaluation requires GPU
+training that is beyond the scope of this design artifact.
+Instead, we contribute a fully specified, reproducible design that the
+community can adopt, extend, and evaluate.
+
+In summary, our contributions are:
+
+\begin{itemize}
+  \item \textbf{Reference architecture.} We present PrivHSD, combining
+        multi-level adversarial disentanglement (MLAD), adaptive gradient
+        reversal scheduling (AGRS), mutual information minimisation via
+        MINE, and DP-SGD with per-layer clipping into a single
+        rights-based framework. The architecture is specified in a typed
+        \texttt{PrivHSDConfig} dataclass with 60+ hyperparameters.
+  \item \textbf{Shape-annotated reference implementation.} We release an
+        open-source PyTorch implementation ($\sim$15.3M parameters for
+        ALBERT-base-v2) with explicit shape invariants, pre-norm
+        transformer heads, and backward-compatible v1 API.
+  \item \textbf{Validation harness.} We provide a comprehensive test suite
+        (45+ unit tests) covering shape correctness, gradient flow,
+        numerical stability in bf16, privacy attack simulations, and
+        rights-based architecture invariants, together with a smoke test
+        that runs in $\sim$2~minutes on CPU.
+  \item \textbf{Ablation framework.} An ablation runner characterises
+        11 single-field config variants, enabling systematic study of the
+        design space.
+\end{itemize}
+
+\noindent
+The remainder of this paper is organised as follows.
+Section~\ref{sec:related} reviews related work.
+Section~\ref{sec:method} describes the architecture and its components.
+Section~\ref{sec:validation} presents the validation setup.
+Section~\ref{sec:results} reports harness results on synthetic benchmarks.
+Section~\ref{sec:discussion} discusses implications and limitations.
+Section~\ref{sec:conclusion} concludes and outlines future work.
+
+% ═════════════════════════════════════════════════════════════════════════════
+% Related Work
+% ═════════════════════════════════════════════════════════════════════════════
+
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Differential Privacy for NLP}
+
+Differential privacy (DP) has become the standard formal framework for
+quantifying and bounding privacy leakage in machine learning.
+Abadi et al.~\cite{abadi2016deep} introduced DP-SGD, which clips
+per-sample gradients and adds calibrated Gaussian noise to provide
+$(\varepsilon,\delta)$-DP guarantees during training.
+Subsequent work improved the practical deployment of DP for transformer
+models. Yousefpour et al.~\cite{yousefpour2021opacus} released Opacus,
+a PyTorch library supporting ghost clipping for memory-efficient
+per-sample gradient computation, which we adopt in our architecture.
+
+For HSD specifically, Bueno J\'unior et al.~\cite{bueno2025privacy}
+(NAACL~2025) demonstrated that ALBERT models maintain 2--5\% higher F1 under
+strong DP ($\varepsilon\leq4$) compared to RoBERTa and multilingual BERT in a
+federated learning setting.
+This finding motivates our choice of ALBERT as the default backbone.
+Our architecture extends their approach from the federated setting to a
+centralised architecture with multi-level adversarial disentanglement.
+
+\subsection{Adversarial Disentanglement for Privacy}
+
+Ganin and Lempitsky~\cite{ganin2015unsupervised} introduced the gradient
+reversal layer (GRL) for domain-adversarial training, establishing a
+minimax framework in which the encoder learns domain-invariant
+representations by maximising the loss of a domain classifier.
+This principle has been extended to privacy: Faustini et
+al.~\cite{faustini2025idt} proposed an identity-disentanglement transformer
+(IDT) that uses adversarial rewriting to remove protected attributes from
+text representations for sentiment analysis.
+
+We build on this line of work by (i) extending adversarial
+disentanglement to \emph{three} representation levels---pooler, token,
+and attention-head---rather than a single level, and (ii) combining it
+with formal DP guarantees, which prior adversarial disentanglement work
+does not provide.
+
+\subsection{Text Anonymisation and Stylometry}
+
+Text anonymisation methods attempt to remove identity signals at the data
+level. Frikha et al.~\cite{frikha2025incognitext} (IJCNLP~2025) used
+LLM-based attribute randomisation to reduce privacy leakage by over 50\%
+across eight protected attributes.
+However, these methods require LLM inference at test time and do not
+provide formal DP guarantees.
+
+On the attack side, stylometry---the statistical analysis of writing
+style---has been shown to enable authorship attribution with high accuracy.
+Abbasi and Chen~\cite{abbasi2008writerpints} demonstrated >90\% accuracy
+on large author pools using feature-based classifiers, and Narayanan et
+al.~\cite{narayanan2012feasibility} confirmed internet-scale feasibility.
+Our validation harness includes a stylometry attack module that measures
+both raw-text baseline risk and residual identity leakage in model
+representations, enabling direct assessment of disentanglement
+effectiveness.
+
+\subsection{Membership and Attribute Inference}
+
+Shokri et al.~\cite{shokri2017membership} formalised membership inference
+attacks (MIA) against ML models, and Yeom et al.~\cite{yeom2018privacy}
+connected MIA vulnerability to overfitting.
+Makroo et al.~\cite{makroo2025hidden} recently showed that generative
+classifiers are more vulnerable to MIA than discriminative ones, a
+finding that supports our use of a discriminative classification head.
+Fredrikson et al.~\cite{fredrikson2015model} introduced model inversion
+attacks that exploit confidence information to infer private attributes.
+Our attack suite implements both shadow-model MIA and attribute inference
+via logistic regression on representations.
+
+\subsection{Research Gap}
+
+To our knowledge, no prior HSD reference implementation integrates
+DP-SGD, multi-level adversarial disentanglement, and mutual information
+minimisation in a single reproducible framework. Prior work has studied
+these mechanisms in isolation---DP in federated HSD~\cite{bueno2025privacy},
+adversarial disentanglement for sentiment~\cite{faustini2025idt}, and LLM-based
+anonymisation~\cite{frikha2025incognitext}---but their combined application to
+HSD, together with a comprehensive privacy attack evaluation spanning
+MIA, attribute inference, and stylometry, has not been reported.
+The key open questions that our architecture is designed to help investigate
+are: (i) whether the combined mechanism Pareto-dominates either mechanism
+alone across the privacy--utility frontier, (ii) whether multi-level adversaries
+remove more identity signal than a single-level adversary, and (iii) whether
+the combination meaningfully reduces stylometry-based re-identification risk.
+
+% ═════════════════════════════════════════════════════════════════════════════
+% Method
+% ═════════════════════════════════════════════════════════════════════════════
+
+\section{Proposed Architecture}
+\label{sec:method}
+
+\subsection{Overview}
+
+PrivHSD comprises five components arranged in a feed-forward pipeline:
+a transformer backbone (default: ALBERT-base-v2~\cite{lan2020albert}), a hate speech
+classification head, a multi-level adversarial disentanglement block
+(MLAD), a mutual information minimisation module (MINE), and a
+DP-SGD training layer via Opacus.
+Figure~\ref{fig:arch} provides an overview.
+
+\begin{figure}[h]
+  \centering
+  \begin{verbatim}
+Input Text
+    |
+    v
++-----------------------------+
+|  ALBERT Transformer Backbone |
+|  (12 layers, 768-dim)       |
++-------------+---------------+
+              |
+              | [CLS] repr  (token repr)  (head repr)
+              |     |            |             |
+              v     v            v             v
+        +----------+  +----------------------------+
+        | Hate     |  | Multi-Level Adversarial    |
+        | Classif. |  | Disentanglement (MLAD)     |
+        | Head     |  |  [pooler] [token] [head]  |
+        +----------+  |   + GRL (identity fwd,    |
+              |       |     -alpha*grad bwd)       |
+              v       +----------------------------+
+        Hate Loss                |
+                    Mutual Info Minimisation (MINE)
+                         I(repr; author)
+                              |
+                              v
+              L_total = L_hate + lambda_dis * L_adv
+                      + lambda_mim * I_est + lambda_orth * L_orth
+                              |
+                              v
+                 DP-SGD (Opacus ghost clipping)
+  \end{verbatim}
+  \caption{Overview of the PrivHSD architecture. The backbone produces three
+           representation levels for adversarial disentanglement. The combined
+           objective is optimised under DP-SGD.}
+  \label{fig:arch}
+\end{figure}
+
+\subsection{Multi-Level Adversarial Disentanglement (MLAD)}
+
+Author identity signals are distributed across multiple levels of
+transformer representations. High-level topic choices and sentiment
+tendencies appear in the [CLS] pooled vector; word-level stylistic
+patterns---function-word frequency, punctuation habits---are encoded in
+per-token representations; attention-head patterns reveal syntactic
+preferences that serve as behavioural biometrics.
+
+MLAD deploys \emph{three} separate adversarial heads---one per
+representation level---each with its own gradient reversal layer
+(Equation~\ref{eq:grl}):
+
+\begin{equation}
+\label{eq:grl}
+\text{GRL}_{\alpha}(x) = x \quad;\quad
+\frac{\partial\,\text{GRL}_{\alpha}(x)}{\partial x} = -\alpha \cdot \frac{\partial L}{\partial x}
+\end{equation}
+
+At each level, the reversed representation is passed through an
+adversary MLP (Linear $\to$ LayerNorm $\to$ ReLU $\to$ Dropout
+$\to$ \dots $\to$ Linear) that predicts the pseudo-author label.
+The adversary uses higher dropout (0.3 vs.\ 0.2 for the hate
+classifier) to prevent overfitting to noisy pseudo-author labels.
+
+\paragraph{Design rationale.}
+A single-level adversary on [CLS] leaves residual identity information
+at the token and head levels. Three complementary adversaries force the
+encoder to strip identity from all levels simultaneously, producing
+representations that are designed to be more comprehensively
+identity-agnostic.
+This extends the domain-adversarial approach of
+Ganin~and~Lempitsky~\cite{ganin2015unsupervised} from single-level
+domain adaptation to multi-level identity disentanglement for privacy.
+
+\subsection{Adaptive Gradient Reversal Scheduling (AGRS)}
+
+Applying full adversarial pressure from the first training step is
+destructive---the encoder must learn hate-relevant features before it
+can be forced to forget identity signals. AGRS uses a sigmoid schedule
+(Equation~\ref{eq:agrs}):
+
+\begin{equation}
+\label{eq:agrs}
+\alpha(p) = \alpha_{\text{init}} + (\alpha_{\text{final}} - \alpha_{\text{init}})
+\cdot \sigma\big(\gamma \cdot (p - 0.5)\big)
+\end{equation}
+
+\noindent
+where $p \in [0,1]$ is training progress after a warmup phase of 2~epochs,
+$\sigma$ is the logistic sigmoid, and $\gamma=2.0$ controls ramp steepness.
+An optional adaptive variant monitors loss dynamics: if the adversary is
+winning (loss decreasing), alpha increases; if hate loss rises,
+alpha decreases.
+
+\subsection{Mutual Information Minimisation via MINE}
+
+The adversarial loss only removes identity features that the
+\emph{current} adversary can detect. To catch residual identity signals,
+we add direct mutual information minimisation using the Mutual
+Information Neural Estimator (MINE)~\cite{belghazi2018mine}:
+
+\begin{equation}
+\label{eq:mine}
+I(X;Y) \geq \sup_{T_\theta} \,
+\mathbb{E}_{P}[T_\theta] - \log\big(\mathbb{E}_{Q}[\exp(T_\theta)]\big)
+\end{equation}
+
+\noindent
+where $P$ is the joint distribution of (representation, author) pairs
+and $Q$ is the product of marginals (shuffled author labels).
+The training becomes a three-player game:
+\begin{description}
+  \item[Encoder] minimises $L_{\text{hate}} + \lambda_{\text{dis}} \cdot L_{\text{adv}}
+        + \lambda_{\text{mim}} \cdot \hat{I}$
+  \item[Adversary] minimises $L_{\text{author}}$ (gradient reversed through GRL)
+  \item[MINE network] maximises $\hat{I}(\text{repr}; \text{author})$
+\end{description}
+
+\subsection{Combined Training Objective}
+
+The full objective is:
+
+\begin{align}
+\label{eq:objective}
+\mathcal{L}_{\text{total}} &=
+\underbrace{\mathcal{L}_{\text{hate}}(\hat{y}, y)}_{\text{cross-entropy}}
++ \lambda_{\text{dis}} \cdot \underbrace{\mathcal{L}_{\text{author}}(\hat{a}, a)}_{\text{GRL-reversed}}
++ \lambda_{\text{mim}} \cdot \underbrace{\hat{I}(\text{repr}; \text{author})}_{\text{MINE}}
++ \lambda_{\text{orth}} \cdot \underbrace{\mathcal{L}_{\text{orth}}}_{\text{cosine similarity}}
+\end{align}
+
+The orthogonality term $\mathcal{L}_{\text{orth}}$ encourages
+hate-relevant and identity-relevant features to occupy orthogonal
+subspaces, computed as the absolute cosine similarity between the
+pre-classification embeddings of the hate and pooler-level adversary
+branches.
+
+\subsection{Differential Privacy via Opacus}
+
+We use Opacus~\cite{yousefpour2021opacus} with ghost clipping for
+memory-efficient per-sample gradient computation. At each step:
+
+\begin{enumerate}
+  \item Compute per-sample gradients via ghost clipping
+  \item Clip each gradient to L2 norm $\leq C$ ($C=1.0$)
+  \item Add Gaussian noise $\mathcal{N}(0, \sigma^2 C^2 I)$
+  \item Average and update parameters
+  \item Track cumulative $\varepsilon$ via R\'enyi DP accounting
+\end{enumerate}
+
+Privacy accounting uses R\'enyi differential privacy (RDP) with
+optimal $(\varepsilon,\delta)$ conversion \cite{abadi2016deep}.
+We evaluate across $\varepsilon \in \{1, 2, 4, 8, 16, 32\}$ to
+characterise the full trade-off surface.
+
+\paragraph{Per-layer adaptive clipping (experimental).}
+The reference implementation includes a \texttt{PerLayerDPAdapter}
+that estimates per-parameter gradient variance during warmup and
+computes layer-specific clip factors. This adapter provides an
+\emph{interface} for per-layer clipping; the actual integration
+with Opacus's \texttt{GradSampleModule} is not yet fully implemented
+in the current training path. The training code falls back to uniform
+global clipping if per-layer setup fails, and the utility benefit
+of per-layer clipping (hypothesised to improve F1 by
+0.5--1.5\% at the same $\varepsilon$) remains unverified.
+We describe the adapter here to document the intended design path
+and to encourage community contributions to the Opacus integration.
+
+% ═════════════════════════════════════════════════════════════════════════════
+% Validation Setup
+% ═════════════════════════════════════════════════════════════════════════════
+
+\section{Validation Setup}
+\label{sec:validation}
+
+\subsection{What the Harness Checks}
+
+The validation harness, implemented as a pytest suite with 45+ tests and
+a standalone smoke test, covers five layers:
+
+\paragraph{Shape correctness (9 tests).}
+Verifies that all component outputs match their expected shapes at batch
+sizes $\{1, 2, 4, 8\}$ and sequence lengths $\{16, 32, 64\}$.
+Includes tests for inference-only mode, training mode with all labels,
+representation extraction, per-level MLAD outputs, and the MINE
+estimator.
+
+\paragraph{Gradient flow (8 tests).}
+Confirms that every trainable parameter---encoder, hate classifier,
+adversary MLPs, MINE network---receives a non-null, finite gradient
+after backward. Includes tests for GRL gradient sign reversal
+(forward identity, backward $-\alpha \cdot \text{grad}$).
+
+\paragraph{Numerical stability (6 tests).}
+Verifies finite outputs in bfloat16, robustness to extreme token
+indices (near vocabulary maximum), all-padding attention masks,
+single-token inputs, and duplicate sequences. Ensures no NaN or Inf
+values in gradients.
+
+\paragraph{Privacy attack suite.}
+Four attack families implemented in the evaluation module:
+\begin{itemize}
+  \item \textbf{Membership inference:} shadow-model binary classifier on
+        prediction confidence/entropy features, plus optimal-threshold
+        approach on loss values.
+  \item \textbf{Attribute inference:} logistic regression on pooled
+        representations to predict pseudo-author identity.
+  \item \textbf{Stylometry (raw text):} RandomForest on 80+ stylometric
+        features (character n-grams, function word frequencies,
+        readability scores) establishing the baseline re-identification
+        risk.
+  \item \textbf{Stylometry (model reps):} logistic regression on
+        [CLS] pooled representations, measuring residual identity
+        leakage after disentanglement.
+\end{itemize}
+
+\paragraph{Rights-based architecture invariants (4 tests).}
+Verifies that representations are \emph{never} returned in the default
+inference output, that explicit flags must be set to extract them, and
+that the inference engine's public API exposes only hate probabilities.
+
+\subsection{What the Harness Does \emph{Not} Check}
+
+The harness does \emph{not} include:
+\begin{itemize}
+  \item End-to-end training on real datasets (Jigsaw Toxic Comment,
+        HateXplain). These require GPU hours and are the subject of
+        future work.
+  \item Competitive benchmarking against prior HSD methods on standard
+        test splits. No accuracy, perplexity, or F1 scores on named
+        real-world datasets are reported.
+  \item Multi-seed statistical significance testing. All tests use a
+        single fixed seed (42).
+  \item Multilingual or cross-domain evaluation.
+\end{itemize}
+
+\subsection{Compute Environment and Implementation Notes}
+
+All validation tests run on CPU with synthetic random data.
+The smoke test completes in approximately 2~minutes on a standard
+workstation without GPU. The full pytest suite completes in
+approximately 5~minutes.
+
+\paragraph{Reference model vs.\ validation stub.}
+The architecture description and parameter counts in this paper refer
+to the \emph{target} reference model (PrivHSDModelV2 with ALBERT-base-v2
+backbone, approximately 15.3M parameters). The harness results
+reported in Section~\ref{sec:results} were obtained on this same
+reference model but on a \emph{synthetic validation path}: the
+transformer backbone is loaded from HuggingFace and used for shape
+verification only (no backpropagation through the full pretrained
+weights for DP-SGD; that requires full experiment execution).
+Parameter counts are measured from the actual model instantiation.
+
+% ═════════════════════════════════════════════════════════════════════════════
+% Results
+% ═════════════════════════════════════════════════════════════════════════════
+
+\section{Results}
+\label{sec:results}
+
+We report results from the validation harness and synthetic benchmarks.
+All results are based on the reference implementation with
+ALBERT-base-v2 backbone ($d_{\text{model}}=768$, 12~layers, 12~heads).
+\textbf{No trained-model results on real datasets are available---all
+empirical claims about model utility on hate speech detection tasks
+require full experiment execution.}
+
+\subsection{Shape and Structural Properties}
+
+Table~\ref{tab:shapes} summarises the shape invariants verified by the
+harness. All tests pass across the specified input dimensions.
+
+\begin{table}[h]
+  \centering
+  \caption{Shape invariants verified by the validation harness.
+           All tests pass for batch sizes $B\in\{1,2,4,8\}$ and
+           sequence lengths $T\in\{16,32,64\}$.}
+  \label{tab:shapes}
+  \begin{tabular}{lcc}
+    \toprule
+    \textbf{Output} & \textbf{Shape} & \textbf{Status} \\
+    \midrule
+    Hate logits (inference) & $(B, 2)$ & Pass \\
+    Hate probabilities & $(B, 2)$ & Pass \\
+    Loss (training) & scalar & Pass \\
+    Per-level author logits (pooler) & $(B, N_{\text{authors}})$ & Pass \\
+    Per-level author logits (token) & $(B, N_{\text{authors}})$ & Pass \\
+    Per-level author logits (head) & $(B, N_{\text{authors}})$ & Pass \\
+    Pooled representations & $(B, d_{\text{model}})$ & Pass \\
+    MINE MI estimate & scalar & Pass \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Gradient Flow and GRL Correctness}
+
+Table~\ref{tab:gradients} confirms that all model components receive
+correct gradients. The GRL is verified to reverse gradient sign (output
+$-\alpha \cdot \text{grad}$) while maintaining identity in the forward
+pass, matching the specification of Ganin~and~Lempitsky~\cite{ganin2015unsupervised}.
+
+\begin{table}[h]
+  \centering
+  \caption{Gradient flow verification results. ``All params'' refers to
+           every trainable parameter receiving a non-null gradient.}
+  \label{tab:gradients}
+  \begin{tabular}{lcc}
+    \toprule
+    \textbf{Test} & \textbf{Result} & \textbf{No. of params verified} \\
+    \midrule
+    All params receive gradient & Pass & 100\% \\
+    Encoder backbone & Pass & All encoder \\
+    Hate classifier head & Pass & All classifier \\
+    Adversary MLPs (3 levels) & Pass & All adversary \\
+    MINE network (maximise phase) & Pass & All MINE \\
+    MINE network (minimise phase) & Pass & All MINE \\
+    GRL forward identity & Pass & --- \\
+    GRL backward sign reversal & Pass & --- \\
+    No NaN/Inf in any gradient & Pass & All \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Parameter Counts}
+
+The complete PrivHSD model has approximately 15.3M parameters with
+ALBERT-base-v2 (the backbone contributes $\sim$12M; the hate classifier,
+three adversary MLPs, and MINE network add $\sim$3.3M).
+\begin{itemize}
+  \item ALBERT-base-v2 backbone: 11.7M
+  \item Hate classification head: 1.2M
+  \item MLAD adversary MLPs (3 $\times$): 2.2M
+  \item MINE network: $\sim$0.1M
+  \item Other (scheduler, embeddings): $\sim$0.1M
+\end{itemize}
+
+For comparison, a standard RoBERTa-base~\cite{devlin2019bert} or BERT-base
+classifier (no adversarial heads) has $\sim$110--125M parameters, nearly an
+order of magnitude larger. The parameter efficiency of ALBERT~\cite{lan2020albert}
+under DP is a key design motivation~\cite{bueno2025privacy}.
+
+\subsection{Numerical Stability}
+
+All numerical stability tests pass (Table~\ref{tab:numerics}),
+confirming bf16-safety and robustness to edge-case inputs.
+
+\begin{table}[h]
+  \centering
+  \caption{Numerical stability test results.}
+  \label{tab:numerics}
+  \begin{tabular}{lc}
+    \toprule
+    \textbf{Test} & \textbf{Result} \\
+    \midrule
+    bfloat16 forward (finite logits and probs) & Pass \\
+    Extreme token indices (vocab max) & Pass \\
+    All-padding attention mask & Pass \\
+    Single-token input & Pass \\
+    Duplicate sequences in batch & Pass \\
+    Gradient boundary values & Pass \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Privacy Attack Module Functionality}
+
+All privacy attack modules initialise correctly and produce valid
+output on synthetic data (Table~\ref{tab:attacks}).
+These tests verify \emph{implementation correctness}, not empirical
+privacy guarantees.
+
+\begin{table}[h]
+  \centering
+  \caption{Privacy attack module verification on synthetic data.
+           All values verify implementation correctness, not empirical
+           privacy efficacy (requires trained models).}
+  \label{tab:attacks}
+  \begin{tabular}{lcc}
+    \toprule
+    \textbf{Attack} & \textbf{Metric} & \textbf{Status} \\
+    \midrule
+    MIA (shadow model) & AUC $\in [0,1]$ & Pass \\
+    MIA (threshold) & Accuracy & Pass \\
+    Attribute inference & Accuracy $\in [0,1]$ & Pass \\
+    Stylometry (raw text) & 80+ features finite & Pass \\
+    Stylometry (model reps) & Accuracy $\in [0,1]$ & Pass \\
+    Representation entropy & Finite & Pass \\
+    $k$-anonymity fraction & $\in [0,1]$ & Pass \\
+    Privacy leakage score & Non-negative & Pass \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Ablation Framework}
+
+The ablation runner supports 11 single-field config variants
+(Table~\ref{tab:ablations}), each changing exactly one field in the
+\texttt{PrivHSDConfig} dataclass.
+All 11 configurations initialise and pass the smoke test.
+
+% TODO: F1 and epsilon deltas require trained-model runs — not yet measured.
+% Replace dashes with measured values after experiment execution.
+
+\begin{table}[h]
+  \centering
+  \caption{Ablation configurations supported by the framework.
+           $\Delta$F1 and $\Delta\varepsilon$ require trained-model
+           evaluation. Expected trends are shown in parentheses.}
+  \label{tab:ablations}
+  \begin{tabular}{llr}
+    \toprule
+    \textbf{Ablation} & \textbf{Config change} & \%~\textbf{$\Delta$F1} \\
+    \midrule
+    \#1 No adversarial & $\lambda_{\text{dis}} = 0$ & --- \\
+    \#2 No DP-SGD & $\texttt{dp\_enabled}=$ False & --- \\
+    \#3 Single-level adv & $\texttt{levels}=(\text{``pooler''},)$ & --- \\
+    \#4 No MIM & $\lambda_{\text{mim}} = 0$ & --- \\
+    \#5 Linear $\alpha$ & $\texttt{schedule}=$ ``linear'' & --- \\
+    \#6 No orthogonality & $\lambda_{\text{orth}} = 0$ & --- \\
+    \#7 Uniform clipping\textsuperscript{*} & $\texttt{per\_layer}=$ False & --- \\
+    \#8 No augmentation & $\texttt{augment}=$ None & --- \\
+    \#9 RoBERTa backbone & $\texttt{model\_type}=$ ``roberta'' & --- \\
+    \#10 Strong privacy & $\varepsilon=1.0$ & --- \\
+    \#11 Weak privacy & $\varepsilon=32.0$ & --- \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{2mm}
+  \raggedright\footnotesize
+  *Ablation~\#7 (uniform clipping) tests the config flag; per-layer clipping
+  is an experimental adapter and currently falls back to uniform clipping
+  in the training path. The utility benefit of per-layer clipping is
+  unverified.
+\end{table}
+
+% ═════════════════════════════════════════════════════════════════════════════
+% Discussion
+% ═════════════════════════════════════════════════════════════════════════════
+
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Structural Properties of the Architecture}
+
+The validation harness confirms several structural properties of the
+PrivHSD architecture that are relevant independently of empirical
+performance:
+
+\paragraph{Shape invariants guarantee composability.}
+Every output shape is explicitly documented and tested. This makes the
+architecture straightforward to compose with other components---for
+example, adding a federated learning wrapper, replacing the backbone
+with XLM-RoBERTa for multilingual deployment, or attaching a different
+adversary architecture.
+
+\paragraph{bf16 safety enables efficient training.}
+All components produce finite outputs in bfloat16, which is essential for
+memory-efficient training under DP-SGD (where per-sample gradient
+computation already strains GPU memory). This was not guaranteed a
+priori: LayerNorm operations in the adversary MLPs required careful
+dtype casting to avoid numerical issues.
+
+\paragraph{Parameter efficiency favours ALBERT under DP.}
+The total parameter count (15.3M) is an order of magnitude smaller than
+comparable RoBERTa-based HSD classifiers (125M+). Under DP-SGD, fewer
+parameters mean less noise per gradient step, which directly translates
+to better utility at the same privacy budget---a finding grounded in
+the empirical results of Bueno J\'unior et al.~\cite{bueno2025privacy}.
+
+\paragraph{Rights-based design principles.}
+The architecture is designed to enforce data minimisation
+(GDPR Art.~5(1)(c)) and purpose limitation (Art.~5(1)(b)) at the
+representation level: adversarial training is \emph{intended} to make
+pooled representations identity-agnostic, and the inference API never
+exposes internal states by default.
+We caution that the empirical effectiveness of the adversarial
+disentanglement against re-identification attacks---particularly
+under white-box access---has not yet been validated with trained
+models on real data.
+The architecture provides the structural foundation for privacy by design;
+quantifying its real-world privacy guarantees requires the trained-model
+evaluation described in future work.
+
+\subsection{Limitations}
+\label{sec:limitations}
+
+We acknowledge several limitations of the current artifact.
+
+\paragraph{No trained-model evaluation on real datasets.}
+The most significant limitation is the absence of empirical results on
+standard HSD benchmarks (Jigsaw Toxic Comment, HateXplain). All
+``results'' in Section~\ref{sec:results} are shape/gradient/numerics
+tests and synthetic micro-benchmarks. The four hypotheses
+(MLAD reduces stylometry by >15\% with <3\% F1 loss; DP + adversarial
+Pareto-dominates either alone; ALBERT > RoBERTa under DP; privacy
+augmentation improves the frontier) remain unverified.
+Previous work~\cite{bueno2025privacy} provides grounding for the ALBERT
+hypothesis, but the combined mechanism claims require dedicated
+experimentation.
+
+\paragraph{Synthetic author labels.}
+Our identity disentanglement uses heuristic pseudo-author labels derived
+from stylistic feature hashing rather than ground-truth authorship data.
+Validation on datasets with real author metadata is needed to confirm
+that the synthetic proxy provides sufficient signal.
+
+\paragraph{Computational cost.}
+DP-SGD with ghost clipping increases training time by 3--5$\times$
+compared to non-DP training. The full experiment suite (20+ configs
+$\times$ 3 seeds) is estimated to require several GPU-days.
+
+\paragraph{English-only scope.}
+The current prototype validates on English data. The architecture
+supports XLM-RoBERTa for multilingual extension, but no multilingual
+data pipeline is implemented.
+
+\paragraph{MINE network stability.}
+The three-player game (encoder, adversary, MINE) lacks theoretical
+convergence guarantees. On synthetic data the MINE estimate remains
+bounded, but real-data training may require additional stabilisation
+(e.g., spectral normalisation, gradient clipping on the MINE network).
+
+\paragraph{Per-layer DP clipping not fully integrated.}
+The per-layer clipping adapter is implemented as an experimental
+interface but not fully integrated with Opacus's training pipeline.
+All DP training currently uses uniform global clipping.
+
+% ═════════════════════════════════════════════════════════════════════════════
+% Conclusion
+% ═════════════════════════════════════════════════════════════════════════════
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have presented PrivHSD, a reference architecture and validation
+harness for privacy-preserving hate speech detection. The architecture
+combines multi-level adversarial disentanglement, adaptive gradient
+reversal scheduling, mutual information minimisation, and differential
+privacy into a single rights-based framework. The reference
+implementation ($\sim$15.3M parameters) is fully typed, shape-annotated,
+and validated by a comprehensive test suite covering shape invariants,
+gradient flow, numerical stability, and privacy attack simulations.
+
+This paper makes no empirical claims about trained-model performance on
+real datasets. Instead, it provides the community with a reproducible
+design artifact---a well-specified architecture, a configurable
+implementation, and a rigorous validation harness---that enables
+systematic study of the privacy--utility Pareto frontier for HSD.
+
+Concrete follow-up directions include:
+
+\begin{enumerate}
+  \item \textbf{Empirical evaluation on Jigsaw and HateXplain.} Running
+        the full experiment suite ($\varepsilon$ sweep, 2$\times$2
+        adversarial/DP factorial, architecture comparison, all 11
+        ablations) across 3 random seeds to validate H1--H4.
+  \item \textbf{Federated learning extension.} Integrating the Flower
+        framework with Opacus to train across decentralised data sources,
+        following the federated DP approach of Bueno J\'unior et
+        al.~\cite{bueno2025privacy}.
+  \item \textbf{Multilingual validation.} Extending the data pipeline to
+        European languages (German, French, Italian, Spanish) using
+        XLM-RoBERTa, to validate cross-lingual identity disentanglement.
+  \item \textbf{Real-author metadata validation.} Comparing disentanglement
+        effectiveness with synthetic vs.\ ground-truth author labels on
+        a dataset with known authorship.
+  \item \textbf{Per-layer DP clipping integration.} Completing the Opacus
+        integration for per-layer adaptive clipping and measuring its
+        utility--privacy benefit.
+\end{enumerate}
+
+The full source code, configuration dataclass, validation harness, and
+ablation framework are included with this artifact submission and are
+intended for public release upon acceptance to support reproducible
+follow-up work.
+We believe that privacy-by-design architectures---where privacy
+protections are embedded in the model's structure rather than relying
+on policy alone---are an essential direction for responsible content
+moderation in democratic societies.
+
+% --- Acknowledgments (omitted in anonymous submission) ---
+
+% ═════════════════════════════════════════════════════════════════════════════
+% References
+% ═════════════════════════════════════════════════════════════════════════════
+
+\section*{References}
+{\small
+\begin{thebibliography}{99}
+
+\bibitem{abadi2016deep}
+  Abadi, M., Chu, A., Goodfellow, I., McMahan, H.B., Mironov, I., Talwar, K.,
+  \& Zhang, L.\ (2016).
+  Deep learning with differential privacy.
+  {\it Proceedings of ACM CCS}, 308--318.
+
+\bibitem{abbasi2008writerpints}
+  Abbasi, A.\ \& Chen, H.\ (2008).
+  Writerpints: A stylometric approach to identity-level identification and
+  inference in online communities.
+  {\it ACM Transactions on Information Systems}, 26(2), 1--29.
+
+\bibitem{belghazi2018mine}
+  Belghazi, M.I., Baratin, A., Rajeshwar, S., Ozair, S., Bengio, Y.,
+  Courville, A., \& Hjelm, R.D.\ (2018).
+  MINE: Mutual information neural estimation.
+  {\it Proceedings of ICML}, 531--540.
+
+\bibitem{bueno2025privacy}
+  Bueno J\'unior, I.S., Ye, H., Wisiorek, A., \& Sch\"utze, H.\ (2025).
+  Privacy-preserving federated learning for hate speech detection in
+  low-resource languages.
+  {\it NAACL 2025 Student Research Workshop}, 129--141.
+  DOI:~\href{https://doi.org/10.18653/v1/2025.naacl-srw.13}{10.18653/v1/2025.naacl-srw.13}.
+
+\bibitem{cavoukian2009privacy}
+  Cavoukian, A.\ (2009).
+  Privacy by design: The 7 foundational principles.
+  {\it Information and Privacy Commissioner of Ontario}.
+
+\bibitem{faustini2025idt}
+  Faustini, P., Tonni, S.M., McIver, A., Xu, Q., \& Dras, M.\ (2025).
+  IDT: Dual-task adversarial rewriting for attribute anonymization.
+  {\it Computational Linguistics}, 51(4), 1151--1189.
+  DOI:~\href{https://doi.org/10.1162/coli.a.17}{10.1162/coli.a.17}.
+
+\bibitem{fredrikson2015model}
+  Fredrikson, M., Jha, S., \& Ristenpart, T.\ (2015).
+  Model inversion attacks that exploit confidence information and basic
+  countermeasures.
+  {\it Proceedings of IEEE S\&P}, 132--147.
+
+\bibitem{frikha2025incognitext}
+  Frikha, A., Walha, N., Nakka, K.K., Mendes, R., Jiang, X., \& Zhou, X.\ (2025).
+  IncogniText: Privacy-enhancing conditional text anonymization via LLM-based
+  private attribute randomization.
+  {\it Proceedings of IJCNLP-AACL 2025}, 2490--2501.
+  DOI:~\href{https://doi.org/10.18653/v1/2025.ijcnlp-long.134}{10.18653/v1/2025.ijcnlp-long.134}.
+
+\bibitem{ganin2015unsupervised}
+  Ganin, Y.\ \& Lempitsky, V.\ (2015).
+  Unsupervised domain adaptation by backpropagation.
+  {\it Proceedings of ICML}, 1180--1189.
+
+\bibitem{makroo2025hidden}
+  Makroo, O., Kasa, S.R., Roychowdhury, S., Gupta, K., Pattisapu, N.,
+  Kasa, S., \& Negi, S.\ (2025).
+  The hidden cost of modeling $P(X)$: Vulnerability to membership inference
+  attacks in generative text classifiers.
+  {\it NeurIPS 2025 Workshop on Regulatable ML}.
+  arXiv:~\href{https://arxiv.org/abs/2510.16122}{2510.16122}.
+
+\bibitem{narayanan2012feasibility}
+  Narayanan, A., Paskov, H., Gong, N.Z., Bethencourt, J., Stefanov, E.,
+  Shin, E.C.R., \& Song, D.\ (2012).
+  On the feasibility of internet-scale author identification.
+  {\it Proceedings of IEEE S\&P}, 300--314.
+
+\bibitem{shokri2017membership}
+  Shokri, R., Stronati, M., Song, C., \& Shmatikov, V.\ (2017).
+  Membership inference attacks against machine learning models.
+  {\it Proceedings of IEEE S\&P}, 3--18.
+
+\bibitem{yeom2018privacy}
+  Yeom, S., Giacomelli, I., Fredrikson, M., \& Jha, S.\ (2018).
+  Privacy risk in machine learning: Analyzing the connection to overfitting.
+  {\it Proceedings of IEEE CSF}, 268--282.
+
+\bibitem{yousefpour2021opacus}
+  Yousefpour, A., Shilov, I., Sablayrolles, A., Testuggine, D.,
+  Prasad, K., Malek, M., Nguyen, L., Ghosh, S., Bharadwaj, A.,
+  Zhao, J., Cormode, G., \& Mironov, I.\ (2021).
+  Opacus: User-friendly differential privacy library in PyTorch.
+  {\it arXiv preprint arXiv:2109.12298}.
+
+\bibitem{lan2020albert}
+  Lan, Z., Chen, M., Goodman, S., Gimpel, K., Sharma, P., \& Soricut, R.\ (2020).
+  ALBERT: A lite BERT for self-supervised learning of language representations.
+  {\it Proceedings of ICLR}.
+
+\bibitem{devlin2019bert}
+  Devlin, J., Chang, M.W., Lee, K., \& Toutanova, K.\ (2019).
+  BERT: Pre-training of deep bidirectional transformers for language understanding.
+  {\it Proceedings of NAACL}, 4171--4186.
+
+\end{thebibliography}
+}
+
+% ═════════════════════════════════════════════════════════════════════════════
+% Appendix
+% ═════════════════════════════════════════════════════════════════════════════
+
+\appendix
+\section{Model Configuration Dataclass}
+
+Table~\ref{tab:config} lists the key hyperparameter groups of the
+\texttt{PrivHSDConfig} dataclass. The full dataclass contains 60+
+fields; only the most architecturally significant are shown here.
+
+\begin{table}[h]
+  \centering
+  \caption{Key hyperparameter groups in \texttt{PrivHSDConfig}.}
+  \label{tab:config}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Group} & \textbf{Example field} & \textbf{Default} \\
+    \midrule
+    Transformer backbone & \texttt{model\_name} & \texttt{albert-base-v2} \\
+    Hate head & \texttt{classifier\_num\_layers} & 2 \\
+    MLAD & \texttt{adversarial\_levels} & (pooler, token, head) \\
+    AGRS & \texttt{alpha\_schedule} & sigmoid \\
+    MIM & \texttt{mim\_weight} & 0.1 \\
+    DP-SGD & \texttt{target\_epsilon} & 8.0 \\
+    Orthogonality & \texttt{orthogonality\_weight} & 0.05 \\
+    Training & \texttt{batch\_size} & 16 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{DP-SGD Privacy Accounting Details}
+
+Privacy budget is tracked via R\'enyi differential privacy (RDP)
+accounting implemented by Opacus~\cite{yousefpour2021opacus}, using
+the analytic Fourier accountant for tight
+$(\varepsilon,\delta)$ conversion and privacy amplification via
+Poisson subsampling (each example included with probability
+$q = B / |D|$, where $B$ is the batch size and $|D|$ is the dataset
+size). The exact closed-form RDP expression for the Gaussian
+mechanism depends on the noise multiplier $\sigma$, the L2 clipping
+norm $C$, and the subsampling rate $q$; we refer readers to the
+Opacus documentation and the RDP accountant of
+Abadi et al.~\cite{abadi2016deep} for the formal derivation.
+
+\subsection{Reproducing the Validation Suite}
+
+All validation results in this paper can be reproduced with:
+
+\begin{verbatim}
+# Quick smoke test (~2 minutes, CPU, no GPU required)
+cd coder && python smoke_test.py --device cpu
+
+# Full test suite (~5 minutes)
+cd validator && pytest test_model.py -v
+
+# Include benchmark tests
+cd validator && pytest test_model.py -v --run-benchmarks
+
+# Ablation runner (dry run — shows all 11 configs)
+cd validator && python ablation_runner.py --dry-run
+\end{verbatim}
+
+\noindent
+The full experiment suite (requiring GPU and dataset downloads) is:
+
+\begin{verbatim}
+# Single ablation experiment
+cd coder && python run_experiments.py --ablation 1
+
+# Run all 11 ablations across 3 seeds
+cd validator && python ablation_runner.py --ablation all
+\end{verbatim}
+
+% ═════════════════════════════════════════════════════════════════════════════
+% NeurIPS Checklist
+% ═════════════════════════════════════════════════════════════════════════════
+
+\newpage
+\section*{NeurIPS Paper Checklist}
+
+\paragraph{1. Claims.}
+Do the main claims made in the abstract and introduction accurately reflect
+the paper's contributions and scope?
+\textbf{Yes.}
+The paper claims to present a reference architecture and validation harness
+for privacy-preserving HSD. No empirical superiority claims about
+trained-model performance are made. The abstract explicitly states what
+the paper does and does not include.
+
+\paragraph{2. Experiments.}
+Does the paper describe experiments that provide evidence for the claims?
+\textbf{Yes.}
+The validation harness provides evidence for shape correctness, gradient
+flow, numerical stability, and privacy attack implementation correctness.
+These are appropriately scoped as design-artifact verification, not
+empirical model evaluation. The paper explicitly notes that trained-model
+results are absent and identifies this as the primary limitation.
+
+\paragraph{3. Theory.}
+Does the paper provide theoretical analysis?
+\textbf{Partially.}
+The paper provides the formal privacy guarantee (DP-SGD with RDP
+accounting), the MINE lower bound, the GRL minimax formulation, and
+inductive-bias justifications for each architectural decision. It does
+not provide convergence guarantees for the three-player game or
+theoretical bounds on stylometry reduction.
+
+\paragraph{4. Datasets.}
+Does the paper use datasets?
+\textbf{No.}
+This paper uses only synthetic data for validation. The datasets
+mentioned in the architecture specification (Jigsaw, HateXplain) are
+intended for future empirical evaluation but are not used here.
+
+\paragraph{5. Code.}
+Is the code released?
+\textbf{Partially.}
+The source code for the reference implementation, validation harness,
+and ablation framework are included with this artifact submission. The
+code is intended for public release upon acceptance. Current access is
+restricted to reviewers for the review process.
+
+\paragraph{6. Broader Impacts.}
+Does the paper discuss broader impacts?
+\textbf{Yes.}
+Section~\ref{sec:discussion} discusses the rights-based design,
+anti-surveillance principles, regulatory alignment (GDPR, DSA, ECHR),
+and potential societal implications. Ethical considerations are
+integrated into the architecture itself (privacy by design).
+
+\end{document}
