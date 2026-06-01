@@ -1,0 +1,150 @@
+# Research Lifecycle Contract: PrivHSD
+# Privacy-preserving Hate Speech Detection for Council of Europe Democracy Hackathon 2026
+
+task_level: level_2   # Full literature review and prototype implementation provided
+domain: [LM, Privacy ML, Ethical AI]
+research_question: >
+  Can adversarial identity disentanglement combined with DP-SGD achieve a provably
+  better privacy-utility Pareto frontier for hate speech detection than either
+  mechanism alone, measured across utility (F1, AUC) and privacy (epsilon, MIA AUC,
+  stylometry re-identification accuracy) metrics?
+
+novelty_claims:
+  - claim: >
+      Combining DP-SGD (via Opacus) with adversarial identity disentanglement
+      (via GRL) yields a Pareto-optimal privacy-utility trade-off for hate speech
+      detection that neither mechanism achieves independently.
+    status: hypothesis
+    evidence: >
+      DP-SGD and adversarial disentanglement have been studied separately for
+      privacy in NLP (Biy+25, NAACL 2025; Faustini+25, CL 2025), but their
+      systematic combination for HSD with comprehensive privacy attack evaluation
+      (MIA + attribute inference + stylometry) has not been reported.
+
+  - claim: >
+      ALBERT-based models maintain 2-5% higher F1 under strong DP (ε ≤ 4) than
+      RoBERTa for HSD tasks due to parameter-efficient cross-layer sharing.
+    status: grounded
+    evidence: >
+      Biy+25 (NAACL 2025 SRW, TUM/MCML) demonstrated ALBERT outperforms
+      RoBERTa/mBERT/XLMR under DP for federated HSD in low-resource languages.
+      Our architecture extends this finding to the centralized + adversarial
+      setting.
+
+  - claim: >
+      Adversarial disentanglement reduces stylometry-based re-identification
+      accuracy by >15% compared to DP-only models with <3% F1 degradation.
+    status: hypothesis
+    evidence: >
+      Stylometry attacks achieve >90% accuracy on raw text (Abbasi & Chen, 2008).
+      GRL-based disentanglement has been shown effective for domain adaptation
+      (Ganin & Lempitsky, 2015) and attribute anonymization (IDT, Faustini+25),
+      but its specific effect on stylometry risk for HSD is unmeasured.
+
+  - claim: >
+      Privacy-augmented training data (controlled label noise + word dropout)
+      improves the Pareto frontier by regularizing against identity overfitting.
+    status: TODO: unverified
+    evidence: >
+      No existing work systematically evaluates privacy-augmented data
+      augmentation in the context of DP + adversarial disentanglement for HSD.
+      This requires empirical validation.
+
+known_related_work:
+  - work: "Biy+25: Privacy-Preserving FL for HSD (NAACL 2025 SRW)"
+    covers: >
+      ALBERT + DP-SGD in federated setting for low-resource HSD. Evaluates
+      privacy-utility trade-off across ε values. Key finding: ALBERT best under DP.
+    leaves_open: >
+      Centralized setting with adversarial disentanglement. No identity-invariance
+      evaluation. No stylometry attacks. Limited to FL scenarios.
+
+  - work: "Faustini+25: IDT - Dual-Task Adversarial Rewriting (CL 2025)"
+    covers: >
+      Adversarial rewriting for attribute anonymization. Identifies which tokens
+      encode private attributes vs. utility-preserving features.
+    leaves_open: >
+      No integration with DP-SGD. Evaluated on sentiment, not HSD. No formal
+      privacy guarantees (ε, δ). No MIA evaluation.
+
+  - work: "Frikha+25: IncogniText - LLM-based Attribute Randomization (IJCNLP 2025)"
+    covers: >
+      Text anonymization via LLM attribute randomization. Reduces privacy leakage
+      by >50% across 8 private attributes.
+    leaves_open: >
+      No DP guarantees. Requires LLM inference at test time. Not evaluated on
+      adversarial robustness or stylometry attacks.
+
+  - work: "Makroo+25: MIA in Generative Text Classifiers (arXiv 2025)"
+    covers: >
+      Systematic comparison of MIA vulnerability. Finds generative classifiers
+      are more vulnerable than discriminative. Recommends exposing probabilities
+      over logits.
+    leaves_open: >
+      Does not evaluate MIA against DP-trained + adversarially disentangled
+      models. Focused on generative models, not HSD-specific.
+
+  - work: "Ye+25: Federated Few-Shot HSD for Marginalized Communities (MRL 2025)"
+    covers: >
+      REACT dataset creation, few-shot FL for HSD in low-resource languages.
+      Personalization for marginalized communities.
+    leaves_open: >
+      No DP guarantees in this work. Small-scale evaluation. Centralized
+      adversarial disentanglement not explored.
+
+  - work: "Ganin & Lempitsky 2015: Domain Adaptation by Backpropagation (ICML)"
+    covers: >
+      Gradient Reversal Layer (GRL) for domain-invariant representations.
+      Theoretically motivated minimax training dynamics.
+    leaves_open: >
+      Not applied to identity disentanglement for privacy. Not evaluated under DP.
+
+  - work: "Abadi+16: Deep Learning with Differential Privacy (CCS 2016)"
+    covers: >
+      DP-SGD algorithm, moments accountant for privacy budgeting. Foundation of
+      Opacus library.
+    leaves_open: >
+      Standard implementation without disentanglement. Used as baseline.
+
+baseline_requirements:
+  - "Non-DP BERT/RoBERTa/ALBERT classifier without adversarial training"
+  - "DP-only ALBERT classifier (ε = 8) without adversarial disentanglement"
+  - "Adversarial-only ALBERT classifier without DP"
+  - "DP-ALBERT with ε ∈ {1, 2, 4, 8, 16} for privacy budget sweep"
+  - "Non-DP RoBERTa-base for architecture comparison"
+
+evaluation_requirements:
+  - "Utility: F1-score, AUC-ROC, accuracy, precision, recall, MCC on test split"
+  - "Privacy: ε, δ accounting via Opacus RDP analyzer"
+  - "MIA: Shadow model attack AUC (lower = better privacy)"
+  - "Attribute inference: Logistic regression on representations (accuracy)"
+  - "Stylometry: Authorship attribution accuracy on model representations"
+  - "Representation audit: Entropy, k-anonymity, privacy leakage score"
+  - "Pareto frontier: Plot ε vs. F1 across all configurations"
+  - "Ablation: Component-wise contribution (DP vs. adversarial vs. both)"
+  - "Statistical significance: 3 random seeds per configuration recommended"
+
+blocking_unknowns:
+  - "Actual model-agnostic MIA AUC for DP + adversarial combination (requires empirical measurement)"
+  - "Whether synthetic pseudo-author labels provide sufficient signal for effective disentanglement (real author labels may change results)"
+  - "Computational feasibility of ghost clipping with ALBERT-large under DP (memory constraints may limit)"
+  - "Whether the privacy-augmented dataset variant actually improves privacy or merely reduces utility (requires controlled experiment)"
+  - "Performance on non-English hate speech data (the prototype uses English datasets; multilingual generalization unknown)"
+
+claim_status:
+  grounded:
+    - "ALBERT outperforms RoBERTa under DP for HSD (Biy+25, NAACL 2025)"
+    - "DP-SGD provides formal (ε, δ)-DP guarantees (Abadi+16, CCS 2016)"
+    - "GRL enables domain-invariant representation learning (Ganin & Lempitsky 2015)"
+    - "Stylometry achieves >90% authorship attribution accuracy on raw text (Abbasi & Chen 2008)"
+    - "Generative classifiers more vulnerable to MIA than discriminative (Makroo+25, arXiv 2025)"
+
+  hypotheses:
+    - "DP + adversarial disentanglement is Pareto-optimal for HSD privacy-utility trade-off"
+    - "Adversarial disentanglement reduces stylometry re-identification by >15% with <3% F1 loss"
+    - "Privacy-augmented data improves the Pareto frontier"
+
+  TODO_unverified:
+    - "Privacy-augmented data improves Pareto frontier for DP + adversarial HSD"
+    - "Synthetic pseudo-author labels are sufficient for effective identity disentanglement"
+    - "Representation entropy correlates with stylometry re-identification resistance"

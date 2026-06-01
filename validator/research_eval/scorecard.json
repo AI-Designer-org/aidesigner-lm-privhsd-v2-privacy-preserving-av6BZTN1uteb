@@ -1,0 +1,256 @@
+{
+  "task_level": "level_2",
+  "domain": "LM",
+  "subdomains": ["Privacy ML", "Ethical AI"],
+  "upstream_contract_present": true,
+  "contract_traceability": [
+    "research/RESEARCH_CONTRACT.yaml — novelty claims, baselines, evaluations, blocking unknowns",
+    "architect/ARCHITECTURE_SPEC.md — 10 traceability table entries mapping contract → architecture → validation hooks",
+    "coder/smoke_test.py — smoke test verifies basic forward pass and component shapes",
+    "validator/test_model.py — comprehensive test suite covering shapes, gradients, numerics, privacy domain tests",
+    "validator/ablation_runner.py — 11 named single-field ablations mapped to architect traceability table",
+    "validator/profile_model.py — torch.profiler script with FLOP estimation"
+  ],
+  "baseline_status": [
+    {
+      "name": "Non-DP ALBERT classifier (no adversarial)",
+      "status": "implemented",
+      "file": "run_experiments.py — get_baseline_configs() includes 'baseline_no_privacy'",
+      "ablation": "no_dp + no_adversarial"
+    },
+    {
+      "name": "DP-only ALBERT classifier (ε=8, no adversarial)",
+      "status": "implemented",
+      "file": "run_experiments.py — get_baseline_configs() includes 'dp_only'",
+      "ablation": "dp_no_adv"
+    },
+    {
+      "name": "Adversarial-only ALBERT classifier (no DP)",
+      "status": "implemented",
+      "file": "run_experiments.py — get_baseline_configs() includes 'adv_only'",
+      "ablation": "no_dp_with_adv"
+    },
+    {
+      "name": "DP-ALBERT with ε ∈ {1, 2, 4, 8, 16, 32} sweep",
+      "status": "implemented",
+      "file": "run_experiments.py — get_privacy_sweep_configs()",
+      "ablation": "privacy budget sweep (6 epsilon values)"
+    },
+    {
+      "name": "Non-DP RoBERTa-base comparison",
+      "status": "implemented",
+      "file": "run_experiments.py — get_architecture_comparison_configs() includes 'roberta_base_dp8'",
+      "ablation": "architecture comparison"
+    }
+  ],
+  "claim_status_summary": {
+    "grounded": [
+      "ALBERT outperforms RoBERTa under DP for HSD (Biy+25, NAACL 2025)",
+      "DP-SGD provides formal (ε, δ)-DP guarantees (Abadi+16, CCS 2016)",
+      "GRL enables domain-invariant representation learning (Ganin & Lempitsky 2015)",
+      "Stylometry achieves >90% authorship attribution accuracy on raw text (Abbasi & Chen 2008)",
+      "Generative classifiers more vulnerable to MIA than discriminative (Makroo+25, arXiv 2025)"
+    ],
+    "hypothesis": [
+      "DP + adversarial disentanglement is Pareto-optimal for HSD privacy-utility trade-off",
+      "Adversarial disentanglement reduces stylometry re-identification by >15% with <3% F1 loss",
+      "Privacy-augmented data improves the Pareto frontier"
+    ],
+    "TODO_unverified": [
+      "Privacy-augmented data improves Pareto frontier for DP + adversarial HSD",
+      "Synthetic pseudo-author labels are sufficient for effective identity disentanglement",
+      "Representation entropy correlates with stylometry re-identification resistance",
+      "Per-layer DP clipping improves utility at same ε (implementation may fall back to uniform)",
+      "MINE-based MI minimization adds measurable benefit beyond adversarial alone"
+    ]
+  },
+  "scores": {
+    "novelty": {
+      "score": 4,
+      "evidence": [
+        "First systematic combination of DP-SGD + multi-level adversarial disentanglement + MINE for HSD",
+        "Novel three-player minimax game: encoder minimizes L_hate + L_adv + I_est while adversary minimizes L_author and MINE maximizes I_est",
+        "Adaptive Gradient Reversal Scheduling (AGRS) with sigmoid schedule — extends Ganin & Lempitsky (2015)",
+        "Comprehensive privacy attack suite: MIA + attribute inference + stylometry re-identification + representation audit"
+      ],
+      "concerns": [
+        "Individual components (DP-SGD, GRL, MINE) are known; novelty is in their combination for HSD",
+        "No empirical results yet — novelty claims will be stronger once Pareto frontier shows combined > either alone",
+        "Synthetic pseudo-author labels may limit disentanglement effectiveness vs. real author data"
+      ]
+    },
+    "experimental_comprehensiveness": {
+      "score": 4,
+      "evidence": [
+        "Privacy budget sweep: ε ∈ {1, 2, 4, 8, 16, 32} + infinity (7 levels)",
+        "Adversarial ablation: 2×2 factorial (DP × adversarial) 4 conditions",
+        "Architecture comparison: ALBERT-base, ALBERT-large, RoBERTa-base (3 backbones)",
+        "Alpha schedule comparison: linear vs sigmoid vs adaptive (3 schedules)",
+        "Ablation runner with 11 named single-field configs covering all architect suggestions",
+        "Comprehensive utility metrics: F1, AUC, precision, recall, MCC, specificity",
+        "Comprehensive privacy metrics: ε, δ, MIA AUC, attribute inference, stylometry, representation audit",
+        "Pareto frontier analysis across both utility and privacy dimensions"
+      ],
+      "concerns": [
+        "Synthetic data used by default; real dataset validation (Jigsaw, HateXplain) not yet run",
+        "No cross-validation across multiple random seeds (TODO: 3 seeds per config recommended)",
+        "Federated learning extension not implemented",
+        "Multilingual/low-resource evaluation not included in current scope"
+      ]
+    },
+    "theoretical_foundation": {
+      "score": 4,
+      "evidence": [
+        "DP-SGD formal guarantee via RDP accounting (Abadi+16; Mironov+19) — (ε, δ)-DP per composition theorem",
+        "GRL minimax formulation: exactly follows Ganin & Lempitsky 2015 with multi-level extension",
+        "MINE lower bound: I(X;Y) ≥ sup_T E_P[T] - log(E_Q[exp(T)]) per Belghazi+18 (ICML)",
+        "Three-player game formulation explicitly stated: encoder minimizes L_total, adversary minimizes L_author, MINE maximizes I_est",
+        "Kaplan et al. scaling laws cited for FLOP estimation: 6N per training step, 2N per forward",
+        "Subsampling amplification theorem used for tighter DP bounds with Poisson sampling",
+        "Per-layer clipping motivated by heterogeneous layer sensitivity (gradient variance analysis)"
+      ],
+      "concerns": [
+        "Per-layer DP clipping theory not fully formalized — relies on empirical gradient variance estimation",
+        "MINE network convergence not theoretically guaranteed in three-player setting",
+        "Synthetic author label clustering lacks theoretical justification for identity disentanglement",
+        "No theoretical bound on stylometry re-identification reduction — currently an empirical claim"
+      ]
+    },
+    "result_analysis": {
+      "score": 2,
+      "evidence": [
+        "Expected/projected results table documented in RESEARCH_NOTE.md (Tables 4.1, 4.2)",
+        "Pareto frontier analysis framework implemented in ParetoFrontierAnalyzer",
+        "Privacy-Utility ratio = F1/ε defined as composite metric",
+        "Ablation runner computes F1_delta and eps_delta from baseline automatically"
+      ],
+      "concerns": [
+        "No empirical results available yet — all current results are projected based on literature",
+        "Key hypothesis tests (H1-H4) depend on empirical data not yet collected",
+        "Statistical significance testing across random seeds not yet implemented",
+        "No uncertainty quantification (confidence intervals, error bars) in current evaluation framework",
+        "Pareto frontier analysis uses simple dominance without multi-objective optimization metrics"
+      ]
+    },
+    "implementation_reproducibility": {
+      "score": 4,
+      "evidence": [
+        "Fully reproducible training pipeline with fixed seed (seed=42 across torch, numpy, random)",
+        "Comprehensive smoke test verifies all components with synthetic data (no HF download required)",
+        "Unit test suite: 45+ tests covering shapes, gradients, numerics, privacy, data pipeline, attack modules",
+        "Ablation runner: all configs expressible as single field changes in PrivHSDConfig dataclass",
+        "Experiment runner: run_experiments.py with --quick, --full, --ablation flags",
+        "Requirements.txt with pinned dependencies",
+        "Config dataclass provides single source of truth for all hyperparameters",
+        "Opacus PrivacyEngine integration with ghost clipping for memory-efficient DP training",
+        "Backward-compatible v1 alias (PrivHSDModel extends PrivHSDModelV2)"
+      ],
+      "concerns": [
+        "Requires real dataset downloads (Jigsaw, HateXplain) for meaningful results — CI may be dataset-limited",
+        "DP training with Opacus requires specific PyTorch version compatibility",
+        "Ghost clipping setup has fallback path; exact memory requirements depend on GPU model",
+        "No Docker/Singularity container specification for environment reproducibility"
+      ]
+    },
+    "writing_readiness": {
+      "score": 4,
+      "evidence": [
+        "Comprehensive RESEARCH_NOTE.md (both research/ and coder/ versions) — full research narrative",
+        "README.md with quick-start, architecture diagram, usage examples, and reference list",
+        "Rights-based architecture explicitly aligned with GDPR, DSA, ECHR, Council of Europe standards",
+        "Ethical considerations section: dual-use prevention, dataset bias, societal impact",
+        "Publication plan with target venues (CoE Hackathon, ACL, FAccT, NeurIPS Privacy Workshop)",
+        "Limitations section transparently documents 5 current limitations",
+        "All evaluation claims are backed by test commands (claim_grounding.md)"
+      ],
+      "concerns": [
+        "Research note lacks 'Related Work' section that systematically compares against each baseline",
+        "No formal proof of convergence or utility guarantee for the combined objective",
+        "Empirical results section is projected (expected values from literature) — needs actual data",
+        "Writing quality is strong but structure could follow standard ML paper format more closely"
+      ]
+    }
+  },
+  "blocking_gaps": [
+    {
+      "code": "benchmark_not_executable",
+      "description": "Full benchmark suite (real datasets, multi-seed, all ablations) cannot execute in CI without GPU + dataset downloads",
+      "severity": "medium",
+      "mitigation": "Quick mode (--quick) works with synthetic data in ~2 minutes for unit verification"
+    },
+    {
+      "code": "claim_not_grounded",
+      "description": "H1-H4 empirical hypotheses cannot be validated without running the full experiment suite",
+      "severity": "high",
+      "mitigation": "All measurement infrastructure (evaluation, attacks, Pareto analysis) is implemented and tested"
+    },
+    {
+      "code": "ablation_missing",
+      "description": "Per-layer DP clipping ablation (#6) may not produce measurable improvement due to Opacus integration complexity",
+      "severity": "low",
+      "mitigation": "Uniform clipping fallback works correctly; per-layer benefit is a secondary hypothesis"
+    },
+    {
+      "code": "coverage_gap",
+      "description": "No multilingual evaluation despite European focus of the hackathon",
+      "severity": "medium",
+      "mitigation": "XLM-RoBERTa backbone supported in architecture; multilingual data pipeline not yet implemented"
+    },
+    {
+      "code": "novelty_unverified",
+      "description": "Core novelty claim (DP + adversarial > either alone) depends on Pareto frontier comparison not yet run",
+      "severity": "high",
+      "mitigation": "All 4 conditions (DP-only, adv-only, both, neither) are implemented in adversarial ablation configs"
+    }
+  ],
+  "recommended_next_experiments": [
+    {
+      "priority": 1,
+      "name": "Pareto frontier for combined DP + adversarial vs. either alone",
+      "command": "python run_experiments.py --ablation adversarial",
+      "expected_outcome": "Combined DP+adv Pareto-dominates both DP-only and adv-only"
+    },
+    {
+      "priority": 1,
+      "name": "Privacy budget sweep with full evaluation attack suite",
+      "command": "python run_experiments.py --ablation privacy",
+      "expected_outcome": "F1 decreases monotonically with ε; MIA AUC increases with ε"
+    },
+    {
+      "priority": 2,
+      "name": "Architecture comparison (ALBERT vs RoBERTa) under DP",
+      "command": "python run_experiments.py --ablation architecture",
+      "expected_outcome": "ALBERT 2-5% higher F1 at ε ≤ 4 (reproducing Biy+25)"
+    },
+    {
+      "priority": 2,
+      "name": "Run all ablations via ablation_runner.py",
+      "command": "python ablation_runner.py --ablation all",
+      "expected_outcome": "Systematic comparison of 11 configs with F1 and ε deltas"
+    },
+    {
+      "priority": 2,
+      "name": "Profile model memory and compute",
+      "command": "python profile_model.py --mode train --steps 20",
+      "expected_outcome": "Characterize training throughput and memory requirements"
+    },
+    {
+      "priority": 3,
+      "name": "Multi-seed experiments (3 seeds per config)",
+      "command": "python run_experiments.py --full && python run_experiments.py --seed 43 && python run_experiments.py --seed 44",
+      "expected_outcome": "Statistical significance and confidence intervals for all metrics"
+    },
+    {
+      "priority": 3,
+      "name": "Privacy-augmented data variant comparison",
+      "command": "python run_experiments.py --ablation augmentation",
+      "expected_outcome": "Medium augmentation Pareto-dominates none and high"
+    },
+    {
+      "priority": 4,
+      "name": "Full unit test suite",
+      "command": "cd validator && python -m pytest test_model.py -v --run-benchmarks",
+      "expected_outcome": "All shape, gradient, numeric, and domain-specific tests pass"
+    }
+  ]
+}
